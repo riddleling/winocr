@@ -53,6 +53,13 @@ curl -u admin:password123 -H "Accept: application/json" -X POST http://localhost
 
 [Goto Download](https://github.com/riddleling/winocr/releases)
 
+### Install by cargo
+
+```
+cargo install winocr
+winocr -h
+```
+
 
 ## Features
 
