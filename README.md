@@ -38,7 +38,7 @@ winocr -s -p 8080
 ### Start the OCR HTTP server and configure HTTP Basic Auth
 
 ```
-macocr -s -a admin:password123 -p 8080
+winocr -s -a admin:password123 -p 8080
 ```
 
 After starting the HTTP server, you can upload an image from the homepage HTML or use `curl` to send an image via the `upload` API
@@ -46,6 +46,28 @@ After starting the HTTP server, you can upload an image from the homepage HTML o
 ```
 curl -u admin:password123 -H "Accept: application/json" -X POST http://localhost:8080/upload -F "file=@01.png"
 ```
+
+## Installation
+
+### Download binary
+
+[Goto Download](https://github.com/riddleling/winocr/releases)
+
+
+## Features
+
+- Directly call the Windows.Media.Ocr.OcrEngine API for OCR
+- Command-line mode: allows batch processing of image files and exports OCR results as TXT files
+- HTTP server mode: provides a web interface to upload images and return OCR results
+- Supports both HTML form upload and API interfaces
+- Configurable HTTP Basic Auth authentication
+- The maximum upload image size is 100 MB
+
+
+## Use cases
+
+- Windows users need to perform batch OCR processing
+- Applications that need to integrate OCR functionality via API
 
 
 ## License

@@ -7,6 +7,7 @@ description = "An OCR Tool using Windows.Media.Ocr.OcrEngine API."
 license = "MIT"
 readme = "README.md"
 keywords = ["windows", "ocr", "http", "server"]
+repository = "https://github.com/riddleling/winocr"
 
 [dependencies]
 clap = { version = "4.5.41", features = ["derive"] }
