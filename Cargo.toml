@@ -1,0 +1,33 @@
+[package]
+name = "winocr"
+version = "0.1.0"
+authors = ["riddleling <riddle.apple@gmail.com>"]
+edition = "2024"
+description = "An OCR Tool using Windows.Media.Ocr.OcrEngine API."
+license = "MIT"
+readme = "README.md"
+keywords = ["windows", "ocr", "http", "server"]
+
+[dependencies]
+clap = { version = "4.5.41", features = ["derive"] }
+wild = "2.2.1"
+infer = "0.19.0"
+axum = { version = "0.8.4", features = ["multipart"] }
+tokio = { version = "1.47.0", features = ["full"] }
+tower-http = { version = "0.6.6", features = ["limit", "trace"] }
+tracing = "0.1.41"
+tracing-subscriber =  { version ="0.3.19", features = ["env-filter"] }
+uuid = { version = "1.17.0", features = ["v4"] }
+serde = { version = "1.0.219", features = ["derive"] }
+base64 = "0.22.1"
+regex = "1.11.1"
+termcolor = "1.4.1"
+
+[dependencies.windows]
+version = "0.61.3"
+features = [
+    "Media_Ocr", 
+    "Graphics_Imaging", 
+    "Storage_Streams", 
+    "Foundation",
+]
