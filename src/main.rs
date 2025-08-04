@@ -1,7 +1,8 @@
 use clap::Parser;
+use tracing::Level;
 use wild;
 use infer;
-use tower_http::limit::RequestBodyLimitLayer;
+use tower_http::{limit::RequestBodyLimitLayer, trace::{DefaultOnFailure, DefaultOnRequest, DefaultOnResponse, TraceLayer}};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use std::{fs, io::{self, Write}, path::{Path, PathBuf}};
 use windows::{
@@ -108,7 +109,22 @@ async fn main() {
         .layer(RequestBodyLimitLayer::new(
             100 * 1024 * 1024, /* 100mb */
         ))
-        .layer(tower_http::trace::TraceLayer::new_for_http());
+        .layer(
+            TraceLayer::new_for_http()
+                .on_request(
+                    DefaultOnRequest::new()
+                        .level(Level::INFO)
+                )
+                .on_response(
+                    DefaultOnResponse::new()
+                        .level(Level::INFO)
+                        .latency_unit(tower_http::LatencyUnit::Millis),
+                )
+                .on_failure(
+                    DefaultOnFailure::new()
+                        .level(Level::ERROR)
+                )
+        );
 
         let app = if !args.auth.is_empty() && is_valid_auth_format(&args.auth) {
             print!("      Auth: ");
