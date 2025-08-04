@@ -1,6 +1,6 @@
 [package]
 name = "winocr"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["riddleling <riddle.apple@gmail.com>"]
 edition = "2024"
 description = "An OCR Tool using Windows.Media.Ocr.OcrEngine API."
