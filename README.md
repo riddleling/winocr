@@ -55,7 +55,7 @@ curl -u admin:password123 -H "Accept: application/json" -X POST http://localhost
 
 The JSON response looks like this:
 
-```
+```json
 {
     "success": true,
     "message": "File uploaded successfully",
@@ -115,5 +115,3 @@ winocr -h
 ## License
 
 MIT License
-
-
