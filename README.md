@@ -23,6 +23,12 @@ Options:
 
 ## How to use
 
+### Read images and perform OCR, then output the result to stdout
+
+```
+winocr *.png
+```
+
 ### Read images and perform OCR, then output the result to text files
 
 ```
@@ -41,17 +47,46 @@ winocr -s -p 8080
 winocr -s -a admin:password123 -p 8080
 ```
 
-After starting the HTTP server, you can upload an image from the homepage HTML or use `curl` to send an image via the `upload` API
+After starting the HTTP server, you can upload an image from the homepage HTML or use `curl` to send an image via the `upload` API:
 
 ```
 curl -u admin:password123 -H "Accept: application/json" -X POST http://localhost:8080/upload -F "file=@01.png"
 ```
 
+The JSON response looks like this:
+
+```
+{
+    "success": true,
+    "message": "File uploaded successfully",
+    "ocr_result": "Hello\nworld\n",
+    "image_width": 1679,
+    "image_height": 1081,
+    "ocr_boxes": [
+        {
+            "text": "Hello",
+            "x": 268.0,
+            "y": 218.0,
+            "w": 353.0,
+            "h": 153.0
+        },
+        {
+            "text": "world",
+            "x": 506.0,
+            "y": 670.0,
+            "w": 433.0,
+            "h": 168.0
+        }
+    ]
+}
+```
+
+`image_width` and `image_height` represent the width and height of the image (in px),
+`x` and `y` represent the top-left origin of the text bounding box (in px),
+`w` and `h` represent the width and height of the text bounding box (in px).
+
+
 ## Installation
-
-### Download binary
-
-[Goto Download](https://github.com/riddleling/winocr/releases)
 
 ### Install by cargo
 
