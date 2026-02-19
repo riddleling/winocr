@@ -6,10 +6,7 @@ use tower_http::{limit::RequestBodyLimitLayer, trace::{DefaultOnFailure, Default
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use std::{fs, io::{self, Write}, path::{Path, PathBuf}};
 use windows::{
-    core::HSTRING,
-    Graphics::Imaging::BitmapDecoder,
-    Media::Ocr::OcrEngine,
-    Storage::{FileAccessMode, StorageFile},
+    Foundation::Rect, Graphics::Imaging::BitmapDecoder, Media::Ocr::{OcrEngine, OcrLine}, Storage::{FileAccessMode, StorageFile}, core::HSTRING
 };
 use axum::{
     extract::{DefaultBodyLimit, Multipart, Request}, 
@@ -40,11 +37,11 @@ struct Args {
     files: Vec<String>,
 
     /// OCR and export text files
-    #[arg(short('o'), long)]
+    #[arg(short('o'), long, conflicts_with = "server")]
     ocr: bool,
 
     /// Run HTTP Server
-    #[arg(short('s'), long)]
+    #[arg(short('s'), long, conflicts_with = "ocr")]
     server: bool,
 
     /// HTTP Basic Auth (username:password)
@@ -62,23 +59,72 @@ struct UploadResponse {
     success: bool,
     message: String,
     ocr_result: String,
+    image_width: i32,
+    image_height: i32,
+    ocr_boxes: Vec<OCRBoxItem>
 }
+
+#[derive(Serialize)]
+struct OCRBoxItem {
+    text: String,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32
+}
+
+impl OCRBoxItem {
+    fn new(text: String, x: f32, y: f32, w: f32, h: f32) -> Self {
+        OCRBoxItem { text, x, y, w, h }
+    }
+}
+
+#[derive(Serialize)]
+struct OCRResult {
+    text: String,
+    image_width: i32,
+    image_height: i32,
+    boxes: Vec<OCRBoxItem>
+}
+
+impl OCRResult {
+    fn new(text: String, image_width: i32, image_height: i32, boxes: Vec<OCRBoxItem>) -> Self {
+        OCRResult {
+            text,
+            image_width,
+            image_height,
+            boxes,
+        }
+    }
+}
+
 
 #[tokio::main]
 async fn main() {
     let args_iter = wild::args();
     let args = Args::parse_from(args_iter);
 
-    if args.ocr { 
+    if !args.ocr && !args.server {
         for file in args.files {
             if is_image(&file) {
                 let mut path = std::env::current_dir().unwrap();
                 path.push(file.clone());
                 
-                if let Ok(text) = get_ocr_result(path) {
+                if let Ok(ocr_result) = get_ocr_result(path) {
+                    print!("{}", ocr_result.text);
+                }
+            }
+        }
+    } else if args.ocr { 
+        for file in args.files {
+            if is_image(&file) {
+                let mut path = std::env::current_dir().unwrap();
+                path.push(file.clone());
+                
+                if let Ok(ocr_result) = get_ocr_result(path) {
                     if let Some(stem) = Path::new(&file).file_stem().and_then(|s| s.to_str()) {
                         let text_file = format!("{}{}", stem, ".txt");
-                        if let Ok(_) = export_text_file(&text, &text_file) {
+                        if let Ok(_) = export_text_file(&ocr_result.text, &text_file) {
                             println!("{} --> {}", file, text_file);
                         }
                     }
@@ -169,7 +215,7 @@ fn is_image(path: &str) -> bool {
     }
 }
 
-fn get_ocr_result(path: PathBuf) -> io::Result<HSTRING> {
+fn get_ocr_result(path: PathBuf) -> io::Result<OCRResult> {
     let file =
         StorageFile::GetFileFromPathAsync(&HSTRING::from(path.to_str().unwrap()))?.get()?;
     let stream = file.OpenAsync(FileAccessMode::Read)?.get()?;
@@ -177,15 +223,96 @@ fn get_ocr_result(path: PathBuf) -> io::Result<HSTRING> {
     let decode = BitmapDecoder::CreateAsync(&stream)?.get()?;
     let bitmap = decode.GetSoftwareBitmapAsync()?.get()?;
 
+    let width  = bitmap.PixelWidth()?;
+    let height = bitmap.PixelHeight()?;
+
     let engine = OcrEngine::TryCreateFromUserProfileLanguages()?;
     let result = engine.RecognizeAsync(&bitmap)?.get()?;
 
-    Ok(result.Text()?)
+    let mut items: Vec<OCRBoxItem> = Vec::new();
+    let mut result_text = String::new();
+
+    for line in result.Lines()? {
+        let text = format!("{}", line.Text()?);
+        result_text.push_str(&format!("{}\n", text));
+        let rect = calc_line_rect(&line)?;
+        items.push(OCRBoxItem::new(text, rect.X, rect.Y, rect.Width, rect.Height));
+    }
+
+    let ocr_result = OCRResult::new(
+        result_text,
+        width,
+        height,
+        items
+    );
+
+    Ok(ocr_result)
 }
 
-fn export_text_file(text: &HSTRING, filename: &String) -> io::Result<()> {
-    let s = format!("{}", text);
-    fs::write(filename, s)?;
+/// 判斷 Rect 是否為空
+fn is_empty_rect(r: &Rect) -> bool {
+    r.Width <= 0.0 || r.Height <= 0.0
+}
+
+/// 合併兩個 Rect
+fn union_rect(a: &Rect, b: &Rect) -> Rect {
+    if is_empty_rect(a) {
+        return *b;
+    }
+    if is_empty_rect(b) {
+        return *a;
+    }
+
+    let left   = a.X.min(b.X);
+    let top    = a.Y.min(b.Y);
+    let right  = (a.X + a.Width).max(b.X + b.Width);
+    let bottom = (a.Y + a.Height).max(b.Y + b.Height);
+
+    Rect {
+        X: left,
+        Y: top,
+        Width: right - left,
+        Height: bottom - top,
+    }
+}
+
+/// 計算整行的 bounding rect
+pub fn calc_line_rect(line: &OcrLine) -> windows::core::Result<Rect> {
+    let words = line.Words()?;   // IVectorView<OcrWord>
+
+    let mut has_any = false;
+    let mut acc = Rect {
+        X: 0.0,
+        Y: 0.0,
+        Width: 0.0,
+        Height: 0.0,
+    };
+
+    for word in words {
+        let r = word.BoundingRect()?;  // 只有 word 有 BoundingRect()
+
+        if !has_any {
+            acc = r;
+            has_any = true;
+        } else {
+            acc = union_rect(&acc, &r);
+        }
+    }
+
+    Ok(expand_rect(acc, 5.0, 5.0))
+}
+
+fn expand_rect(r: Rect, pad_x: f32, pad_y: f32) -> Rect {
+    Rect {
+        X: r.X - pad_x,
+        Y: r.Y - pad_y,
+        Width: r.Width + pad_x * 2.0,
+        Height: r.Height + pad_y * 2.0,
+    }
+}
+
+fn export_text_file(text: &String, filename: &String) -> io::Result<()> {
+    fs::write(filename, text)?;
     Ok(())
 }
 
@@ -255,12 +382,18 @@ async fn upload_file(headers: HeaderMap, mut multipart: Multipart) -> impl IntoR
                         let mut success = false;
                         let mut title = "❌ The file type is not an image".to_string();
                         let mut message = "The file type is not an image".to_string();
-                        let mut ocr_result= "".to_string();
+                        let mut ocr_result_text= "".to_string();
+                        let mut image_width = 0;
+                        let mut image_height = 0;
+                        let mut ocr_boxes = Vec::new();
 
                         if let Some(path_str) = save_path.to_str() {
                             if is_image(&path_str) {
-                                if let Ok(text) = get_ocr_result(save_path) {
-                                    ocr_result = format!("{}", text);
+                                if let Ok(ocr_result) = get_ocr_result(save_path) {
+                                    ocr_result_text = format!("{}", ocr_result.text);
+                                    image_width = ocr_result.image_width;
+                                    image_height = ocr_result.image_height;
+                                    ocr_boxes = ocr_result.boxes;
                                     message = "File uploaded successfully".to_string();
                                     title = "OCR Result:".to_string();
                                     success = true;
@@ -272,7 +405,10 @@ async fn upload_file(headers: HeaderMap, mut multipart: Multipart) -> impl IntoR
                             Json(UploadResponse {
                                 success: success,
                                 message: message.to_string(),
-                                ocr_result: ocr_result,
+                                ocr_result: ocr_result_text,
+                                image_width: image_width,
+                                image_height: image_height,
+                                ocr_boxes: ocr_boxes
                             }).into_response()
                         } else {
                             Html(format!(
@@ -290,7 +426,7 @@ async fn upload_file(headers: HeaderMap, mut multipart: Multipart) -> impl IntoR
                                 </body>
                                 </html>
                                 "#,
-                                title, ocr_result.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
+                                title, ocr_result_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
                             )).into_response()
                         }
                     }
@@ -299,7 +435,10 @@ async fn upload_file(headers: HeaderMap, mut multipart: Multipart) -> impl IntoR
                             Json(UploadResponse {
                                 success: false,
                                 message: "Failed to write file".to_string(),
-                                ocr_result: "".to_string()
+                                ocr_result: "".to_string(),
+                                image_width: 0,
+                                image_height: 0,
+                                ocr_boxes: Vec::new()
                             }).into_response()
                         } else {
                             Html(r#"
@@ -322,7 +461,10 @@ async fn upload_file(headers: HeaderMap, mut multipart: Multipart) -> impl IntoR
                     Json(UploadResponse {
                         success: false,
                         message: "Unable to create file".to_string(),
-                        ocr_result: "".to_string()
+                        ocr_result: "".to_string(),
+                        image_width: 0,
+                        image_height: 0,
+                        ocr_boxes: Vec::new()
                     }).into_response()
                 } else {
                     Html(r#"
@@ -344,7 +486,10 @@ async fn upload_file(headers: HeaderMap, mut multipart: Multipart) -> impl IntoR
             Json(UploadResponse {
                 success: false,
                 message: "No file received".to_string(),
-                ocr_result: "".to_string()
+                ocr_result: "".to_string(),
+                image_width: 0,
+                image_height: 0,
+                ocr_boxes: Vec::new()
             }).into_response()
         } else {
             Html(r#"
